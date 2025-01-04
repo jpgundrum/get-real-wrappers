@@ -24,11 +24,19 @@ logging.basicConfig(
     filemode='a',        # Append mode
     format='%(asctime)s - %(levelname)s - %(name)s - %(message)s'
 )
+
+# Create a logger for SDK
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+logging.getLogger('web3').setLevel(logging.WARNING)
+logging.getLogger('urllib3').setLevel(logging.WARNING)
+logging.getLogger('web3.manager.RequestManager').setLevel(logging.WARNING)
+logging.getLogger('web3.providers.HTTPProvider').setLevel(logging.WARNING)
+
 _abi_cache = {}
 
-
-class Sdk:
+class peaq_service_sdk:
     def __init__(self, rpc_url, peaq_service_url, service_api_key, project_api_key, gas_station_address, gas_station_public, gas_station_private):
         """
         Initializes the SDK class, encapsulating GetRealService and GasStation functionalities.
@@ -149,12 +157,12 @@ class Sdk:
             print("Error storing data key:", e)
             raise
         
-    def create_did_hash(self, email_signature, machine_address):
+    def create_did_hash(self, eoa_account, email_signature, machine_address):
         """
         Creates a DID hash from an email signature using protobuf serialization.
         """
         doc = peaq_py_proto.Document()
-        doc.id = f"did:peaq:${machine_address}"
+        doc.id = f"did:peaq:{machine_address}"
         doc.controller = f"did:peaq:{machine_address}"
 
         service = doc.services.add()
@@ -162,18 +170,20 @@ class Sdk:
         service.type = "emailSignature"
         service.data = email_signature
         
-        # TODO: Add the locally signed message as a parameter and add to the did document
-        # local_sign()
-        # signature = doc.signature.add()
-        # service.type = "signature_type" (e.g ed25519. sr25519, etc.)
-        # service.hash = hash
-        # service.issuer = issuer_address
+        # eoa account signs the id and stores in did doc to prove which can be used to prove ownership
+        id_signature = self._local_sign(eoa_account, doc.id)
+        signature = doc.signature
+        signature.type = "ECDSA"
+        signature.hash = id_signature
+        signature.issuer = eoa_account.address
 
         serialized_data = doc.SerializeToString()
+        print(serialized_data)
         serialized_hex = serialized_data.hex()
-        logger.debug("Serialized DID Hash created with value of: ".format(repr(serialized_hex)))
+        
+        logger.debug("Serialized DID Hash created with value of: ".format(serialized_hex))
         deserialized_did = self._deserialize_did(serialized_data)
-        logger.debug("Deserialized Document: {}".format(repr(deserialized_did)))
+        logger.debug("Deserialized Document: \n{}".format(deserialized_did))
         return serialized_hex
 
     def create_did_calldata(self, name, did_hash, machine_address):
@@ -183,8 +193,8 @@ class Sdk:
         did_function_signature = "addAttribute(address,bytes,bytes,uint32)"
         did_function_selector = self.w3.keccak(text=did_function_signature)[:4].hex()
         
-        logger.debug("Name of DID being stored: ".format(repr(name)))
-        logger.debug("Address at which the DID is being stored: ".format(repr(machine_address)))
+        logger.debug("Name of DID being stored: {}".format(name))
+        logger.debug("Address at which the DID is being stored: {}".format(machine_address))
         # convert to bytes
         name = name.encode("utf-8").hex()
         did_hash = did_hash.encode("utf-8").hex()
@@ -194,7 +204,7 @@ class Sdk:
         ).hex()
         
         calldata = did_function_selector + encoded_params
-        logger.debug("Create DID calldata: ".format(repr(calldata)))
+        logger.debug("Create DID calldata: {}".format(calldata))
         return calldata
     
     def add_storage_calldata(self, item_type, item):
@@ -347,11 +357,16 @@ class Sdk:
         return self.verify("v1/data/verify-count", data)
 
 
-    def _local_sign(self, signing_key, data):
-        raise NotImplemented()  # TODO
+    def _local_sign(self, account, message):
+        message = message.encode('utf-8')
+        signable_message = encode_defunct(message)
+        eoa_signature = account.sign_message(signable_message).signature.hex()
+        return eoa_signature
 
     def _deserialize_did(self, data):
-        return peaq_py_proto.Document().ParseFromString(data)
+        deserialized_doc = peaq_py_proto.Document()
+        deserialized_doc.ParseFromString(data)  # ParseFromString modifies deserialized_doc in place
+        return deserialized_doc
     
     def _get_chain_data(self, from_account):
         chain_id = self.w3.eth.chain_id  # rpc_url chain id that is connected to web3
