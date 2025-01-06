@@ -3,3 +3,5 @@ python/.env
 python/did_serialization/__pycache__/
 python/__pycache__/
 python/logs
+
+python/frontend/node_modules

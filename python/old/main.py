@@ -1,8 +1,8 @@
 import os
 import json
-from sdk import peaq_service_sdk
-import h160_to_ss58
-import get_attribute
+from python.utils.sdk import peaq_service_sdk
+import python.old.h160_to_ss58 as h160_to_ss58
+import python.old.get_attribute as get_attribute
 
 from did_serialization import peaq_py_proto
 
@@ -45,6 +45,7 @@ DID_NAME="peaq"
 
 off_chain_storage = {EOA_PUBLIC_KEY: "did:peaq:0xe18c79cF1e6C2AB5f955086b78d7cEeECB1F04e0/peaq"}
 
+# DePINs on peaq network can share this data base and run verifiers to prove validity
 def verify_mapping(resolveable_did, eoa):
     # Split the string into parts
     parts = resolveable_did.split("/")
@@ -95,6 +96,7 @@ def verify_mapping(resolveable_did, eoa):
 
 # The format of the machine_address can be used to resolve a did document to verify if the eoa_address did in fact create the signature 
 # in the machine_address's did document
+# - IDEA: DePINs on peaq network can share a data base to see if the eao has been mapped already.
 def store_off_chain(eoa_address, machine_address):
     off_chain_storage[eoa_address] = f"did:peaq:${machine_address}/${DID_NAME}"
     
@@ -127,13 +129,13 @@ def create_smart_account(service_sdk, eoa, nonce):
     # Read peaq storage to see if a machine_address was returned; if not then there is none present so we can create one. 
     # This will reduce the amount of redundant machine address on-chain.
     # - if one is found read the the uri to get the resolved did machine document and verify that the
-    read_peaq_storage(eoa_address, eoa)
+    # read_peaq_storage(eoa_address, eoa)
     
-    # # Perform this once per eoa... will need to link machine address to eoa address
-    # deploy_signature = service_sdk.generate_owner_deploy_signature(eoa_address, nonce)
-    # machine_address = service_sdk.deploy_machine_smart_account(eoa_address, nonce, deploy_signature)
-    # eoa["machine_address"] = machine_address
-    # return eoa
+    # Perform this once per eoa... will need to link machine address to eoa address
+    deploy_signature = service_sdk.generate_owner_deploy_signature(eoa_address, nonce)
+    machine_address = service_sdk.deploy_machine_smart_account(eoa_address, nonce, deploy_signature)
+    eoa["machine_address"] = machine_address
+    return eoa
 
 # Get-real service function calls to generate an email signature and did calldata to send that is funded.
 # by the GasStationFactory contract. 
@@ -142,6 +144,7 @@ def create_smart_account(service_sdk, eoa, nonce):
 # TODO How to track what eoa_accounts own what machine_addresses? Do quests/tags define this? 
 def register_did(service_sdk, eoa):
     email_signature = service_sdk.generate_email_signature(eoa["email"], eoa["machine_address"], eoa["tag"])
+    
     did_hash = service_sdk.create_did_hash(eoa["account"], email_signature, eoa["machine_address"])
     did_calldata = service_sdk.create_did_calldata(DID_NAME, did_hash, eoa["machine_address"])
     return did_calldata

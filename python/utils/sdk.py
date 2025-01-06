@@ -7,7 +7,7 @@ from did_serialization import peaq_py_proto
 
 from web3 import Web3
 from eth_abi.packed import encode_packed
-from eth_utils import keccak
+from eth_utils import keccak, to_hex
 from eth_account.messages import encode_defunct
 from eth_abi import encode
 
@@ -20,7 +20,7 @@ ABI_GAS_STATION='gas_station_abi'
 # Configure the logger to write to a file
 logging.basicConfig(
     level=logging.DEBUG,
-    filename='./logs/peaq_sdk.log',  # Log file name
+    filename='./python_server/logs/peaq_sdk.log',  # Log file name
     filemode='a',        # Append mode
     format='%(asctime)s - %(levelname)s - %(name)s - %(message)s'
 )
@@ -157,10 +157,17 @@ class peaq_service_sdk:
             print("Error storing data key:", e)
             raise
         
-    def create_did_hash(self, eoa_account, email_signature, machine_address):
+        
+    def create_id_to_sign(self, smart_accoout_address):
+        doc = peaq_py_proto.Document()
+        doc.id = f"did:peaq:{smart_accoout_address}"
+        return doc.id
+        
+    def create_did_hash(self, eoa_address, did_signature, email_signature, machine_address):
         """
         Creates a DID hash from an email signature using protobuf serialization.
         """
+        # print("test")
         doc = peaq_py_proto.Document()
         doc.id = f"did:peaq:{machine_address}"
         doc.controller = f"did:peaq:{machine_address}"
@@ -171,14 +178,19 @@ class peaq_service_sdk:
         service.data = email_signature
         
         # eoa account signs the id and stores in did doc to prove which can be used to prove ownership
-        id_signature = self._local_sign(eoa_account, doc.id)
+        
+        # request frontend for user to sign the message (id) by sending it's prehashed value
+        # - this will tie ownership from eoa to the machine address
+        # - frontend sends the signature to this backend to store in DID Document that can be verified (DePINs on peaq verify each other?)
+        # id_signature = self._local_sign(eoa_account, doc.id) 
+
         signature = doc.signature
         signature.type = "ECDSA"
-        signature.hash = id_signature
-        signature.issuer = eoa_account.address
+        signature.issuer = eoa_address
+        signature.hash = did_signature
 
         serialized_data = doc.SerializeToString()
-        print(serialized_data)
+        # print(serialized_data)
         serialized_hex = serialized_data.hex()
         
         logger.debug("Serialized DID Hash created with value of: ".format(serialized_hex))
@@ -228,10 +240,11 @@ class peaq_service_sdk:
         logger.debug("peaq storage calldata: ".format(repr(calldata)))
         return calldata
     
-    def generate_eoa_signature(self, eoa_account, machine_address, target, data, nonce):
+    def generate_eoa_signature(self, machine_address, target, data, nonce):
         """
         Generates an EOA signature for a transaction. Needs the externally a
         """
+        
         packed = encode_packed(
             ['address', 'address', 'bytes', 'uint256'],
             [
@@ -243,10 +256,11 @@ class peaq_service_sdk:
         )
 
         message_hash = keccak(packed)
-        message = encode_defunct(primitive=message_hash)
-        eoa_signature = eoa_account.sign_message(message).signature.hex()
+        message_hash_hex = "0x" + message_hash.hex()
+        return message_hash_hex
+
         logger.debug("Externally Owner Account signature: {}".format(repr(eoa_signature)))
-        return eoa_signature
+        # return eoa_signature
     
     def generate_owner_signature(self, eoa, target, data, nonce):
         """
@@ -273,14 +287,16 @@ class peaq_service_sdk:
         """
         Executes a transaction using the executeTransaction() function in the Gas Station contract.
         """
+        if eoa_signature.startswith("0x"):
+            new = eoa_signature[2:]  # Remove the "0x" prefix
         tx = self.gas_station.functions.executeTransaction(
-            eoa,
-            machine_address,
+            Web3.to_checksum_address(eoa),
+            Web3.to_checksum_address(machine_address),
             target,
             bytes.fromhex(data),
             nonce,
             bytes.fromhex(signature),
-            bytes.fromhex(eoa_signature)
+            bytes.fromhex(new)
         )
 
         return self.send_transaction(tx)
@@ -290,9 +306,12 @@ class peaq_service_sdk:
         """
         Builds, signs, and sends a transaction to the peaq/agung network.
         """
-        estimated_gas = tx.estimate_gas({'from': self.owner_account.address})
+        # print("before", self.owner_account.address)
+        checksum_address = Web3.to_checksum_address(self.owner_account.address)
+        # print("after", self.owner_account.address)
+        estimated_gas = tx.estimate_gas({'from': checksum_address})
         logger.debug("Estimated Gas: {}".format(estimated_gas))
-        chain_data = self._get_chain_data(self.owner_account)
+        chain_data = self._get_chain_data(self.owner_account, checksum_address)
 
         tx = tx.build_transaction({
             'nonce': chain_data["nonce"],
@@ -368,10 +387,10 @@ class peaq_service_sdk:
         deserialized_doc.ParseFromString(data)  # ParseFromString modifies deserialized_doc in place
         return deserialized_doc
     
-    def _get_chain_data(self, from_account):
+    def _get_chain_data(self, from_account, checksum_address):
         chain_id = self.w3.eth.chain_id  # rpc_url chain id that is connected to web3
         gas_price = self.w3.eth.gas_price  # get current gas price from the connected network
-        nonce = self.w3.eth.get_transaction_count(from_account.address)  # obtain nonce from your account address
+        nonce = self.w3.eth.get_transaction_count(checksum_address)  # obtain nonce from your account address
         logger.debug("Chain ID: {}".format(chain_id))
         logger.debug("Gas Price: {}".format(gas_price))
         logger.debug("Account Nonce: {}".format(nonce))
@@ -379,10 +398,11 @@ class peaq_service_sdk:
 
     def _load_abi(self, filename):
         result = _abi_cache.get(filename)
-        if result is None:
-            # Use path relative to this __file__ (../precompile_abi/${filename}.json)
-            path = os.path.abspath(os.path.join(__file__, *(1 * (os.pardir,) + ("precompile_abi", "{}.json".format(filename)))))
-            with open(path) as f:
+        if result is None:    
+            project_root = os.path.abspath(os.path.join(__file__, os.pardir, os.pardir))
+            # Construct the path to the sibling directory
+            sibling_path = os.path.join(project_root, "precompile_abi", f"{filename}.json")
+            with open(sibling_path) as f:
                 result = json.load(f)['output']['abi']
             _abi_cache[filename] = result
         return result
