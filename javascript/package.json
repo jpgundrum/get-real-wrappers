@@ -1,0 +1,22 @@
+{
+  "name": "javascript",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "main.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@peaq-network/sdk": "^0.7.2",
+    "@polkadot/util": "^13.0.2",
+    "axios": "^1.7.9",
+    "cors": "^2.8.5",
+    "ethers": "^6.13.4",
+    "express": "^4.21.2",
+    "web3": "^4.16.0",
+    "winston": "^3.17.0"
+  }
+}

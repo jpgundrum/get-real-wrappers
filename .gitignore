@@ -1,5 +1,12 @@
-javascript/
+javascript/node_modules
+javascript/logs/peaq_sdk.log
+javascript/logs/server_sdk.log
+javascript/.env
+javascript/package-lock.json
+
 python/.env
 python/did_serialization/__pycache__/
 python/__pycache__/
 python/logs
+
+python/frontend/node_modules
