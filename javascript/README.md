@@ -143,6 +143,14 @@ Returns:
 }
 ```
 
+# TODO
+- Create a wrapped sdk that contains 3 Service classes
+1. GasStationService
+2. GetRealService
+3. peaqSdkEvm Service
+
+Wrap all these services and expected flows in a GetRealSdk.js, which acts as a “coordinator”. Then a user can create a new instance of this coordinator to easily use the services it offers.
+
 # QUESTIONS
 - Currently hardcoding gas -> what is the best strategy
 - Nonce management/storage
